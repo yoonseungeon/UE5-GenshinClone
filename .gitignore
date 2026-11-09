@@ -1,0 +1,29 @@
+# Unreal generated files
+/Binaries/
+/Intermediate/
+/Saved/
+/DerivedDataCache/
+/Plugins/**/Intermediate/
+
+# IDE-generated files
+/.vs/
+/.idea/
+*.sln
+*.slnx
+*.suo
+*.VC.db
+*.VC.opendb
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# External assets stay local; Content/Game remains tracked
+/Content/ExternalAsset/
+
+# Local editor workspace data
+/Content/Developers/
+/Content/Collections/
+
+# Local notes
+/Docs/
+/AGENTS.md
