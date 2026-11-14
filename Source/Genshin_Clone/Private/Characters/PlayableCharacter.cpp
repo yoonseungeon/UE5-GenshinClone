@@ -43,14 +43,17 @@ APlayableCharacter::APlayableCharacter()
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveAsset(TEXT("/Game/Game/Input/Actions/IA_Move.IA_Move"));
 	static ConstructorHelpers::FObjectFinder<UInputAction> LookAsset(TEXT("/Game/Game/Input/Actions/IA_Look.IA_Look"));
 	static ConstructorHelpers::FObjectFinder<UInputAction> JumpAsset(TEXT("/Game/Game/Input/Actions/IA_Jump.IA_Jump"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> DashAsset(TEXT("/Game/Game/Input/Actions/IA_Dash.IA_Dash"));
 
 	checkf(MoveAsset.Succeeded(), TEXT("IA_Move 로드 실패"));
 	checkf(LookAsset.Succeeded(), TEXT("IA_Look 로드 실패"));
 	checkf(JumpAsset.Succeeded(), TEXT("IA_Jump 로드 실패"));
+	checkf(DashAsset.Succeeded(), TEXT("IA_Jump 로드 실패"));
 
 	MoveInputAction = MoveAsset.Object;
 	LookInputAction = LookAsset.Object;
 	JumpInputAction = JumpAsset.Object;
+	DashInputAction = DashAsset.Object;
 }
 
 // [입력-03] Controller가 Pawn을 처음 조종하거나 조종 대상을 변경할 때,
