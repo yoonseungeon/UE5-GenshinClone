@@ -13,6 +13,11 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Math/RotationMatrix.h"
 
+#include "Components/DashComponent.h"
+
+#include "Animation/PlayableAnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+
 APlayableCharacter::APlayableCharacter()
 {
 	// [회전-01] Controller의 회전을 Actor에도 적용할지
@@ -23,6 +28,10 @@ APlayableCharacter::APlayableCharacter()
 	// [회전-01] CharacterMovement: Character에 선언되어 있음.
 	// 캐릭터가 이동하려는 방향(가속 방향)으로 Actor를 돌린다.
 	GetCharacterMovement()->bOrientRotationToMovement = true;
+	// 애니메이션 루트 모션 중에도 이동 입력에 따른 회전을 허용한다.
+	GetCharacterMovement()->bAllowPhysicsRotationDuringAnimRootMotion = true;
+	// 회전 속도
+	GetCharacterMovement()->RotationRate = FRotator(0.f, 900.f, 0.f);
 
 	// [카메라-01] Spring Arm
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -38,6 +47,10 @@ APlayableCharacter::APlayableCharacter()
 
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
+
+	// [대시-02] 대시 컴포넌트를 만들고 실제 이동 처리보다 먼저 갱신되도록 연결한다.
+	DashComponent = CreateDefaultSubobject<UDashComponent>(TEXT("DashComponent"));
+	GetCharacterMovement()->AddTickPrerequisiteComponent(DashComponent);
 
 	// [입력-02] IA
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveAsset(TEXT("/Game/Game/Input/Actions/IA_Move.IA_Move"));
@@ -70,6 +83,12 @@ void APlayableCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(LookInputAction, ETriggerEvent::Triggered, this, &APlayableCharacter::Look);
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+
+	// [대시-03] 우클릭은 대시를 요청하고, 이동키 해제는 이동 의도를 초기화한다.
+	EnhancedInputComponent->BindAction(DashInputAction, ETriggerEvent::Started, this, &APlayableCharacter::RequestDash);
+
+	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ClearMovementIntent);
+	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ClearMovementIntent);
 }
 
 // [입력-04] 이동 입력 처리
@@ -85,6 +104,11 @@ void APlayableCharacter::Move(const FInputActionValue& Value)
 	const FVector Foward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 	const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
+	MovementIntent = Foward * Input.Y + Right * Input.X;
+	// 현재 이동 입력을 대시의 단계 전환 판정에도 전달한다.
+	if (IsValid(DashComponent))
+		DashComponent->UpdateMovementIntent(MovementIntent);
+
 	AddMovementInput(Foward, Input.Y);
 	AddMovementInput(Right, Input.X);
 }
@@ -96,4 +120,30 @@ void APlayableCharacter::Look(const FInputActionValue& Value)
 
 	AddControllerYawInput(Input.X);
 	AddControllerPitchInput(Input.Y);
+}
+
+// [대시-03] 애님 인스턴스가 추천한 변형을 대시 시작 요청으로 전달한다.
+void APlayableCharacter::RequestDash()
+{
+	if (!IsValid(DashComponent))
+	{
+		return;
+	}
+
+	UPlayableAnimInstance* AnimInstance = Cast<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	DashComponent->TryStartDash(AnimInstance->GetDashStartVariant());
+}
+
+// [대시-03] 이동키를 놓으면 이동 의도를 초기화하고 대시에도 입력 해제를 전달한다.
+void APlayableCharacter::ClearMovementIntent()
+{
+	MovementIntent = FVector::ZeroVector;
+
+	if (IsValid(DashComponent))
+		DashComponent->UpdateMovementIntent(MovementIntent);
 }

@@ -17,6 +17,10 @@ class GENSHIN_CLONE_API APlayableCharacter : public ACharacterBase
 public:
 	APlayableCharacter();
 
+	const FVector& GetMovementIntent() const { return MovementIntent; }
+
+	class UDashComponent* GetDashComponent() const { return DashComponent.Get(); }
+
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
@@ -28,7 +32,7 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<class UCameraComponent> Camera;
 
-	// Input
+	// Input Action
 	UPROPERTY(VisibleAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> MoveInputAction;
 
@@ -44,4 +48,14 @@ private:
 private:
 	void Move(const struct FInputActionValue& Value);
 	void Look(const struct FInputActionValue& Value);
+
+	void RequestDash();
+	void ClearMovementIntent();
+
+private:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<class UDashComponent> DashComponent;
+
+	// 카메라 기준 이동 입력을 월드 방향으로 변환한 현재 이동 의도다.
+	FVector MovementIntent = FVector::ZeroVector;
 };
