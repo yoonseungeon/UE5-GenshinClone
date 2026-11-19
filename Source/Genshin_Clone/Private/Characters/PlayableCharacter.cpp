@@ -84,36 +84,34 @@ void APlayableCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 
-	// [대시-03] 우클릭은 대시를 요청하고, 이동키 해제는 이동 의도를 초기화한다.
+	// [대시-04] 우클릭은 대시를 요청하고, 이동키 해제는 입력 방향을 0으로 만든다.
 	EnhancedInputComponent->BindAction(DashInputAction, ETriggerEvent::Started, this, &APlayableCharacter::RequestDash);
 
-	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ClearMovementIntent);
-	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ClearMovementIntent);
+	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ClearMovementInputDirection);
+	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ClearMovementInputDirection);
 }
 
-// [입력-04] 이동 입력 처리
+// [입력-04] 카메라 기준 입력을 월드 방향으로 바꾸고 캐릭터 이동에 전달한다.
 void APlayableCharacter::Move(const FInputActionValue& Value)
 {
 	// Controller: Pawn에 정의
 	if (!Controller)
 		return;
 
-	const FVector2D Input = Value.Get<FVector2D>();
+	const FVector2D MovementInput = Value.Get<FVector2D>();
 
 	const FRotator YawRotation(0.f, GetControlRotation().Yaw, 0.f);
-	const FVector Foward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-	MovementIntent = Foward * Input.Y + Right * Input.X;
-	// 현재 이동 입력을 대시의 단계 전환 판정에도 전달한다.
-	if (IsValid(DashComponent))
-		DashComponent->UpdateMovementIntent(MovementIntent);
+	MovementInputDirection = ForwardDirection * MovementInput.Y + RightDirection * MovementInput.X;
+	DashComponent->SetMovementInputDirection(MovementInputDirection);
 
-	AddMovementInput(Foward, Input.Y);
-	AddMovementInput(Right, Input.X);
+	AddMovementInput(ForwardDirection, MovementInput.Y);
+	AddMovementInput(RightDirection, MovementInput.X);
 }
 
-// [입력-05] 시점 입력 처리
+// [입력-05] 시점 입력만큼 카메라의 좌우·상하 각도를 바꾼다.
 void APlayableCharacter::Look(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
@@ -122,28 +120,16 @@ void APlayableCharacter::Look(const FInputActionValue& Value)
 	AddControllerPitchInput(Input.Y);
 }
 
-// [대시-03] 애님 인스턴스가 추천한 변형을 대시 시작 요청으로 전달한다.
+// [대시-04] 애님 인스턴스가 추천한 변형을 대시 시작 요청으로 전달한다.
 void APlayableCharacter::RequestDash()
 {
-	if (!IsValid(DashComponent))
-	{
-		return;
-	}
-
-	UPlayableAnimInstance* AnimInstance = Cast<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
-	if (!AnimInstance)
-	{
-		return;
-	}
-
-	DashComponent->TryStartDash(AnimInstance->GetDashStartVariant());
+	UPlayableAnimInstance* PlayableAnimInstance = CastChecked<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
+	DashComponent->TryStartDash(PlayableAnimInstance->GetDashStartVariant());
 }
 
-// [대시-03] 이동키를 놓으면 이동 의도를 초기화하고 대시에도 입력 해제를 전달한다.
-void APlayableCharacter::ClearMovementIntent()
+// [대시-04] 이동키를 놓으면 캐릭터와 대시에 저장된 입력 방향을 0으로 만든다.
+void APlayableCharacter::ClearMovementInputDirection()
 {
-	MovementIntent = FVector::ZeroVector;
-
-	if (IsValid(DashComponent))
-		DashComponent->UpdateMovementIntent(MovementIntent);
+	MovementInputDirection = FVector::ZeroVector;
+	DashComponent->SetMovementInputDirection(MovementInputDirection);
 }

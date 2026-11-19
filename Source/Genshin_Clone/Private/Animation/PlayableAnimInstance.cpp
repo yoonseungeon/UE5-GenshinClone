@@ -5,78 +5,92 @@
 #include "GameFramework/Pawn.h"
 #include "Characters/PlayableCharacter.h"
 
-#include "Animation/AnimSequence.h"
+#include "SequencePlayerLibrary.h"
 
 // [애니메이션-01] 애니메이션이 업데이트될 때마다 호출된다.
-// [대시-10] 게임 스레드에서 사용자 입력과 대시 데이터를 AnimGraph용 스냅샷으로 복사한다.
+// [대시-16] 이동 입력·정지 클립 기억·RunCycle 복귀 시간을 AnimGraph용으로 준비한다.
 void UPlayableAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
-	APlayableCharacter* Character = Cast<APlayableCharacter>(TryGetPawnOwner());
-	if (!Character)
-	{
-		bShouldRun = false;
-		DashState = FDashRuntimeState{};
-		DashStartAnimation = nullptr;
-		DashStopAnimation = nullptr;
-		DashReturnAnimation = nullptr;
-
-		RunStartPosition = 0.0f;
-		bDashReturnUsesMirroredRun = false;
-		LastConsumedDashActivationId = 0;
-
+	APlayableCharacter* PlayableCharacter = Cast<APlayableCharacter>(TryGetPawnOwner());
+	if (!PlayableCharacter)
 		return;
+
+	bHasMovementInput = !PlayableCharacter->GetMovementInputDirection().IsNearlyZero();
+	UDashComponent* DashComponent = PlayableCharacter->GetDashComponent();
+
+	// 새 SprintStop 재생 이력을 공유 정지 기억에 반영한다.
+	const int32 SprintStopDashId = DashComponent->GetLastSprintStopDashId();
+	if (SprintStopDashId != 0 && SprintStopDashId != LastRecordedSprintStopDashId)
+	{
+		bNextRunStopIsMirrored = DashComponent->GetLastSprintStopVariant() == EDashAnimationVariant::Mirrored;
+		LastRecordedSprintStopDashId = SprintStopDashId;
 	}
 
-	// 애니메이션 갱신 시 이동 입력 유무를 판정한다.
-	bShouldRun = !Character->GetMovementIntent().IsNearlyZero();
+	DashStateSnapshot = DashComponent->GetDashRuntimeState();
+	bRunCycleNeedsTimeSyncAfterDash = (DashStateSnapshot.EndReason == EDashEndReason::ReturnedToRun) && (DashStateSnapshot.DashId != LastRunCycleReturnDashId);
 
-	UDashComponent* DashComponent = Character->GetDashComponent();
-	DashState = DashComponent->GetRuntimeState();
-	DashStartAnimation = DashComponent->GetAnimationForPhase(EDashPhase::Starting);
-	DashStopAnimation = DashComponent->GetAnimationForPhase(EDashPhase::Stopping);
-	DashReturnAnimation = DashComponent->GetAnimationForPhase(EDashPhase::ReturningToRun);
+	// 이동 입력이 없으면 이번 복귀 시간 맞춤을 건너뛰어 이후 일반 RunCycle에 남기지 않는다.
+	if (bRunCycleNeedsTimeSyncAfterDash && !bHasMovementInput)
+	{
+		LastRunCycleReturnDashId = DashStateSnapshot.DashId;
+		bRunCycleNeedsTimeSyncAfterDash = false;
+	}
 
-	// 다음 Run을 원본·미러 중 무엇으로, 몇 초부터 재생할지 미리 준비하는 코드
-	const FDashAnimationSet& AnimationSet = DashComponent->GetActiveAnimationSet();
-	bDashReturnUsesMirroredRun = AnimationSet.bUseMirroredRun;
-	const bool bHasNewDashReturn = DashState.EndReason == EDashEndReason::ReturnedToRun && DashState.ActivationId != LastConsumedDashActivationId;
-	RunStartPosition = bHasNewDashReturn ? FMath::Max(AnimationSet.RunPoseMatchTime - DashComponent->GetReturnToRunBlendTime(), 0.0f) : 0.0f;
+	RunCycleStartTimeSeconds = 0.0f;
+	if (bRunCycleNeedsTimeSyncAfterDash)
+	{
+		bNextRunCycleIsMirrored = DashComponent->GetCurrentDashAnimationSet().bRunCycleIsMirrored;
+		RunCycleStartTimeSeconds = DashComponent->GetRunCycleStartTimeAfterDash();
+	}
 }
 
-// [애니메이션-03] Run 진입 시 마지막 RunStop 동작으로 달리기 동작을 선택한다.
-// [대시-11] 일반 Run 진입은 RunStop 기준으로, 정상 대시 복귀는 세트 기준으로 한 번 선택한다.
-void UPlayableAnimInstance::SelectRunVariant()
+// [애니메이션-03] 일반 RunCycle 진입은 마지막 정지 클립의 반대 변형을 선택한다.
+void UPlayableAnimInstance::SelectRunCycleClip()
 {
-	const bool bHasNewDashReturn = DashState.EndReason == EDashEndReason::ReturnedToRun && DashState.ActivationId != LastConsumedDashActivationId;
-	bUseMirroredRun = bHasNewDashReturn ? bDashReturnUsesMirroredRun : !bUseMirroredRunStop;
-	LastConsumedDashActivationId = DashState.ActivationId;
+	if (bRunCycleNeedsTimeSyncAfterDash)
+		return;
+
+	bNextRunCycleIsMirrored = !bNextRunStopIsMirrored;
 }
 
-// [대시-11] SprintStop의 원본·미러 선택을 공유하는 정지 기억에 저장한다.
-void UPlayableAnimInstance::RememberDashStopVariant()
+// [대시-17] 선택된 RunCycle 노드의 재생 시간을 맞추고 완료한 대시 번호를 저장한다.
+void UPlayableAnimInstance::SetRunCycleTimeAfterDash(const FAnimNodeReference& RunCycleNode, bool bRunCycleNodeIsMirrored)
 {
-	bUseMirroredRunStop = DashState.Variant == EDashAnimationVariant::Mirrored;
+	if (!bRunCycleNeedsTimeSyncAfterDash || bRunCycleNodeIsMirrored != bNextRunCycleIsMirrored)
+		return;
+
+	EAnimNodeReferenceConversionResult NodeConversionResult;
+	const FSequencePlayerReference RunCyclePlayer = USequencePlayerLibrary::ConvertToSequencePlayer(RunCycleNode, NodeConversionResult);
+	if (NodeConversionResult != EAnimNodeReferenceConversionResult::Succeeded)
+		return;
+
+	USequencePlayerLibrary::SetAccumulatedTime(RunCyclePlayer, RunCycleStartTimeSeconds);
+	LastRunCycleReturnDashId = DashStateSnapshot.DashId;
+	bRunCycleNeedsTimeSyncAfterDash = false;
 }
 
-// [대시-11] 커브로 대시 변형을 선택하고, 사용할 값이 없으면 정지 기억의 반대를 선택한다.
+// [대시-18] RunStopVariant 커브의 부호로 대시 변형을 고르고, 커브가 없으면 마지막 정지 클립의 반대를 고른다.
 EDashAnimationVariant UPlayableAnimInstance::GetDashStartVariant() const
 {
-	static const FName CurveName(TEXT("RunStopVariant"));
-	float Value = 0.0f;
-	// Stanby 재생 중 일 때 RunCycle Curve니깐 GetCurveValue가 false 반환함.
-	if (GetCurveValue(CurveName, Value) && FMath::IsFinite(Value) && !FMath::IsNearlyZero(Value))
-		return Value > 0.0f ? EDashAnimationVariant::Mirrored : EDashAnimationVariant::Normal;
+	static const FName RunStopVariantCurveName(TEXT("RunStopVariant"));
+	float RunStopVariantCurveValue = 0.0f;
+	// Standby처럼 RunStopVariant 커브가 없는 포즈에서는 GetCurveValue가 false를 반환한다.
+	if (GetCurveValue(RunStopVariantCurveName, RunStopVariantCurveValue))
+		return RunStopVariantCurveValue > 0.0f ? EDashAnimationVariant::Mirrored : EDashAnimationVariant::Normal;
 
-	return bUseMirroredRunStop ? EDashAnimationVariant::Normal : EDashAnimationVariant::Mirrored;
+	return bNextRunStopIsMirrored ? EDashAnimationVariant::Normal : EDashAnimationVariant::Mirrored;
 }
 
 // [애니메이션-02] RunStop 진입 시 마지막 평가 커브로 정지 클립의 원본·미러를 선택한다.
-void UPlayableAnimInstance::SelectRunStopVariant()
+void UPlayableAnimInstance::SelectRunStopClip()
 {
-	static const FName CurveName(TEXT("RunStopVariant"));
-	float Value = 0.0f;
-	// Value: 1 or -1
-	bUseMirroredRunStop = GetCurveValue(CurveName, Value) && FMath::IsFinite(Value) && Value > 0.0f;
+	if (IsDashing())
+		return;
+
+	static const FName RunStopVariantCurveName(TEXT("RunStopVariant"));
+	float RunStopVariantCurveValue = 0.0f;
+	// RunStopVariantCurveValue: 1 or -1
+	bNextRunStopIsMirrored = GetCurveValue(RunStopVariantCurveName, RunStopVariantCurveValue) && FMath::IsFinite(RunStopVariantCurveValue) && RunStopVariantCurveValue > 0.0f;
 }
