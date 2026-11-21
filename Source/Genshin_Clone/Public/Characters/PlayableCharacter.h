@@ -49,7 +49,9 @@ private:
 	void Move(const struct FInputActionValue& Value);
 	void Look(const struct FInputActionValue& Value);
 
+	// [지상이동-04] 우클릭 시작 요청과 유지 입력 해제를 전달한다.
 	void RequestDash();
+	void ReleaseSprintInput();
 	void ClearMovementInputDirection();
 
 private:

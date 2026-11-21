@@ -48,9 +48,8 @@ APlayableCharacter::APlayableCharacter()
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
 
-	// [대시-02] 대시 컴포넌트를 만들고 실제 이동 처리보다 먼저 갱신되도록 연결한다.
+	// [지상이동-02] 대시 시작 승인과 Sprint 유지 입력을 보관할 컴포넌트를 만든다.
 	DashComponent = CreateDefaultSubobject<UDashComponent>(TEXT("DashComponent"));
-	GetCharacterMovement()->AddTickPrerequisiteComponent(DashComponent);
 
 	// [입력-02] IA
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveAsset(TEXT("/Game/Game/Input/Actions/IA_Move.IA_Move"));
@@ -61,7 +60,7 @@ APlayableCharacter::APlayableCharacter()
 	checkf(MoveAsset.Succeeded(), TEXT("IA_Move 로드 실패"));
 	checkf(LookAsset.Succeeded(), TEXT("IA_Look 로드 실패"));
 	checkf(JumpAsset.Succeeded(), TEXT("IA_Jump 로드 실패"));
-	checkf(DashAsset.Succeeded(), TEXT("IA_Jump 로드 실패"));
+	checkf(DashAsset.Succeeded(), TEXT("IA_Dash 로드 실패"));
 
 	MoveInputAction = MoveAsset.Object;
 	LookInputAction = LookAsset.Object;
@@ -84,8 +83,10 @@ void APlayableCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 	EnhancedInputComponent->BindAction(JumpInputAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 
-	// [대시-04] 우클릭은 대시를 요청하고, 이동키 해제는 입력 방향을 0으로 만든다.
+	// [지상이동-03] 우클릭 시작은 대시 요청으로, 해제·취소는 Sprint 유지 입력 해제로 연결한다.
 	EnhancedInputComponent->BindAction(DashInputAction, ETriggerEvent::Started, this, &APlayableCharacter::RequestDash);
+	EnhancedInputComponent->BindAction(DashInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ReleaseSprintInput);
+	EnhancedInputComponent->BindAction(DashInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ReleaseSprintInput);
 
 	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ClearMovementInputDirection);
 	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ClearMovementInputDirection);
@@ -105,7 +106,6 @@ void APlayableCharacter::Move(const FInputActionValue& Value)
 	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
 	MovementInputDirection = ForwardDirection * MovementInput.Y + RightDirection * MovementInput.X;
-	DashComponent->SetMovementInputDirection(MovementInputDirection);
 
 	AddMovementInput(ForwardDirection, MovementInput.Y);
 	AddMovementInput(RightDirection, MovementInput.X);
@@ -120,16 +120,27 @@ void APlayableCharacter::Look(const FInputActionValue& Value)
 	AddControllerPitchInput(Input.Y);
 }
 
-// [대시-04] 애님 인스턴스가 추천한 변형을 대시 시작 요청으로 전달한다.
+// [지상이동-04] 우클릭 유지를 먼저 저장하고 현재 애님 인스턴스에 SprintStart 시작을 요청한다.
 void APlayableCharacter::RequestDash()
 {
-	UPlayableAnimInstance* PlayableAnimInstance = CastChecked<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
-	DashComponent->TryStartDash(PlayableAnimInstance->GetDashStartVariant());
+	// 우클릭이 눌려 있다는 사실을 저장
+	DashComponent->SetSprintInputHeld(true);
+	UPlayableAnimInstance* PlayableAnimInstance = Cast<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
+	if (!PlayableAnimInstance)
+		return;
+
+	// 애님 인스턴스에 이번 SprintBS를 선택하고 대시 승인을 요청하라고 전달
+	PlayableAnimInstance->RequestSprintStart();
 }
 
-// [대시-04] 이동키를 놓으면 캐릭터와 대시에 저장된 입력 방향을 0으로 만든다.
+// [지상이동-04] 우클릭 해제·취소 시 Sprint 유지 입력을 끈다.
+void APlayableCharacter::ReleaseSprintInput()
+{
+	DashComponent->SetSprintInputHeld(false);
+}
+
+// [지상이동-03] 이동키를 놓으면 캐릭터의 이동 입력 방향을 0으로 만든다.
 void APlayableCharacter::ClearMovementInputDirection()
 {
 	MovementInputDirection = FVector::ZeroVector;
-	DashComponent->SetMovementInputDirection(MovementInputDirection);
 }

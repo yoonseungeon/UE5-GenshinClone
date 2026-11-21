@@ -1,96 +1,132 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #include "Animation/PlayableAnimInstance.h"
 
-#include "GameFramework/Pawn.h"
 #include "Characters/PlayableCharacter.h"
+#include "Components/DashComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
-#include "SequencePlayerLibrary.h"
-
-// [애니메이션-01] 애니메이션이 업데이트될 때마다 호출된다.
-// [대시-16] 이동 입력·정지 클립 기억·RunCycle 복귀 시간을 AnimGraph용으로 준비한다.
-void UPlayableAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
+// [지상이동-02] 루트 모션 정책과 최초 이동 계획을 설정한다.
+UPlayableAnimInstance::UPlayableAnimInstance()
 {
-	Super::NativeUpdateAnimation(DeltaSeconds);
+	RootMotionMode = ERootMotionMode::RootMotionFromEverything;
+	UpdateMovementVariantPlan(false);
+}
+
+// 일반 출발은 RunCycle의 처음부터 시작한다.
+void UPlayableAnimInstance::NativeInitializeAnimation()
+{
+	Super::NativeInitializeAnimation();
+	StartTimes.RunCycle = 0.0f;
+}
+
+// 게임 시작 시 컴포넌트에 남아 있는 과거 승인 번호를 흡수한다.
+void UPlayableAnimInstance::NativeBeginPlay()
+{
+	Super::NativeBeginPlay();
+
+	APlayableCharacter* PlayableCharacter = Cast<APlayableCharacter>(TryGetPawnOwner());
+	if (!PlayableCharacter)
+		return;
+
+	DashRequest.SnapshotId = PlayableCharacter->GetDashComponent()->GetDashRequestId();
+	DashRequest.PendingId = DashRequest.SnapshotId;
+	DashRequest.LastEnteredId = DashRequest.SnapshotId;
+}
+
+// [지상이동-05] SprintBS의 재입력 허용 시각으로 승인을 요청하고 성공한 요청 번호를 저장한다.
+void UPlayableAnimInstance::RequestSprintStart()
+{
+	APlayableCharacter* PlayableCharacter = Cast<APlayableCharacter>(TryGetPawnOwner());
+	if (!PlayableCharacter)
+		return;
+
+	UDashComponent* DashComponent = PlayableCharacter->GetDashComponent();
+	if (!DashComponent->TryStartDash(TransitionTimes.SprintBSStopAllowedTime))
+		return;
+
+	DashRequest.PendingId = DashComponent->GetDashRequestId();
+}
+
+// [지상이동-07] 계속 바뀌는 입력과 지상 여부 및 승인 번호만 매 업데이트에서 갱신한다.
+void UPlayableAnimInstance::NativeUpdateAnimation(float DeltaTime)
+{
+	Super::NativeUpdateAnimation(DeltaTime);
 
 	APlayableCharacter* PlayableCharacter = Cast<APlayableCharacter>(TryGetPawnOwner());
 	if (!PlayableCharacter)
 		return;
 
 	bHasMovementInput = !PlayableCharacter->GetMovementInputDirection().IsNearlyZero();
-	UDashComponent* DashComponent = PlayableCharacter->GetDashComponent();
+	bIsMovingOnGround = PlayableCharacter->GetCharacterMovement()->IsMovingOnGround();
 
-	// 새 SprintStop 재생 이력을 공유 정지 기억에 반영한다.
-	const int32 SprintStopDashId = DashComponent->GetLastSprintStopDashId();
-	if (SprintStopDashId != 0 && SprintStopDashId != LastRecordedSprintStopDashId)
-	{
-		bNextRunStopIsMirrored = DashComponent->GetLastSprintStopVariant() == EDashAnimationVariant::Mirrored;
-		LastRecordedSprintStopDashId = SprintStopDashId;
-	}
+	const UDashComponent* DashComponent = PlayableCharacter->GetDashComponent();
+	bSprintInputHeld = DashComponent->IsSprintInputHeld();
+	DashRequest.SnapshotId = DashComponent->GetDashRequestId();
 
-	DashStateSnapshot = DashComponent->GetDashRuntimeState();
-	bRunCycleNeedsTimeSyncAfterDash = (DashStateSnapshot.EndReason == EDashEndReason::ReturnedToRun) && (DashStateSnapshot.DashId != LastRunCycleReturnDashId);
-
-	// 이동 입력이 없으면 이번 복귀 시간 맞춤을 건너뛰어 이후 일반 RunCycle에 남기지 않는다.
-	if (bRunCycleNeedsTimeSyncAfterDash && !bHasMovementInput)
-	{
-		LastRunCycleReturnDashId = DashStateSnapshot.DashId;
-		bRunCycleNeedsTimeSyncAfterDash = false;
-	}
-
-	RunCycleStartTimeSeconds = 0.0f;
-	if (bRunCycleNeedsTimeSyncAfterDash)
-	{
-		bNextRunCycleIsMirrored = DashComponent->GetCurrentDashAnimationSet().bRunCycleIsMirrored;
-		RunCycleStartTimeSeconds = DashComponent->GetRunCycleStartTimeAfterDash();
-	}
+	if (!bIsMovingOnGround)
+		DashRequest.LastEnteredId = DashRequest.SnapshotId;
 }
 
-// [애니메이션-03] 일반 RunCycle 진입은 마지막 정지 클립의 반대 변형을 선택한다.
+// [지상이동-08] 아직 반영하지 않은 새 승인 요청으로 자기 전환 여부를 판단한다.
+bool UPlayableAnimInstance::HasNewDashRequest() const
+{
+	return bIsMovingOnGround && (DashRequest.SnapshotId == DashRequest.PendingId) && (DashRequest.SnapshotId != DashRequest.LastEnteredId);
+}
+
+// [지상이동-09] Run의 시간은 앞 상태에서 이미 준비했으므로 진입에서는 선택만 확정한다.
 void UPlayableAnimInstance::SelectRunCycleClip()
 {
-	if (bRunCycleNeedsTimeSyncAfterDash)
-		return;
-
-	bNextRunCycleIsMirrored = !bNextRunStopIsMirrored;
+	SelectedVariants.bRunCycleIsMirrored = VariantPlan.bRunCycleIsMirrored;
 }
 
-// [대시-17] 선택된 RunCycle 노드의 재생 시간을 맞추고 완료한 대시 번호를 저장한다.
-void UPlayableAnimInstance::SetRunCycleTimeAfterDash(const FAnimNodeReference& RunCycleNode, bool bRunCycleNodeIsMirrored)
-{
-	if (!bRunCycleNeedsTimeSyncAfterDash || bRunCycleNodeIsMirrored != bNextRunCycleIsMirrored)
-		return;
-
-	EAnimNodeReferenceConversionResult NodeConversionResult;
-	const FSequencePlayerReference RunCyclePlayer = USequencePlayerLibrary::ConvertToSequencePlayer(RunCycleNode, NodeConversionResult);
-	if (NodeConversionResult != EAnimNodeReferenceConversionResult::Succeeded)
-		return;
-
-	USequencePlayerLibrary::SetAccumulatedTime(RunCyclePlayer, RunCycleStartTimeSeconds);
-	LastRunCycleReturnDashId = DashStateSnapshot.DashId;
-	bRunCycleNeedsTimeSyncAfterDash = false;
-}
-
-// [대시-18] RunStopVariant 커브의 부호로 대시 변형을 고르고, 커브가 없으면 마지막 정지 클립의 반대를 고른다.
-EDashAnimationVariant UPlayableAnimInstance::GetDashStartVariant() const
-{
-	static const FName RunStopVariantCurveName(TEXT("RunStopVariant"));
-	float RunStopVariantCurveValue = 0.0f;
-	// Standby처럼 RunStopVariant 커브가 없는 포즈에서는 GetCurveValue가 false를 반환한다.
-	if (GetCurveValue(RunStopVariantCurveName, RunStopVariantCurveValue))
-		return RunStopVariantCurveValue > 0.0f ? EDashAnimationVariant::Mirrored : EDashAnimationVariant::Normal;
-
-	return bNextRunStopIsMirrored ? EDashAnimationVariant::Normal : EDashAnimationVariant::Mirrored;
-}
-
-// [애니메이션-02] RunStop 진입 시 마지막 평가 커브로 정지 클립의 원본·미러를 선택한다.
+// RunStop 진입 순간의 커브로 정지 클립을 고르고 다음 이동 계획을 갱신한다.
 void UPlayableAnimInstance::SelectRunStopClip()
 {
-	if (IsDashing())
-		return;
+	SelectedVariants.bRunStopIsMirrored = DoesCurveSelectMirroredClip(RunStopVariantCurveName);
+	UpdateMovementVariantPlan(SelectedVariants.bRunStopIsMirrored);
+	StartTimes.RunCycle = 0.0f;
+}
 
-	static const FName RunStopVariantCurveName(TEXT("RunStopVariant"));
-	float RunStopVariantCurveValue = 0.0f;
-	// RunStopVariantCurveValue: 1 or -1
-	bNextRunStopIsMirrored = GetCurveValue(RunStopVariantCurveName, RunStopVariantCurveValue) && FMath::IsFinite(RunStopVariantCurveValue) && RunStopVariantCurveValue > 0.0f;
+// SprintStart 진입에서 다음 SprintBS 선택을 확정하고 진입한 요청 번호를 저장한다.
+void UPlayableAnimInstance::SelectSprintBSClip()
+{
+	SelectedVariants.bSprintBSIsMirrored = VariantPlan.bSprintIsMirrored;
+	DashRequest.LastEnteredId = DashRequest.SnapshotId;
+}
+
+// Sprint 진입에서 SprintBS와 같은 원본·미러의 SprintCycle을 고른다.
+void UPlayableAnimInstance::SelectSprintCycleClip()
+{
+	SelectedVariants.bSprintCycleIsMirrored = SelectedVariants.bSprintBSIsMirrored;
+}
+
+// SprintToRun 진입에서 SprintBS 반대의 원본·미러를 고르고 이후 RunCycle 선택과 시작 위치를 준비한다.
+void UPlayableAnimInstance::SelectSprintToRunClip()
+{
+	SelectedVariants.bSprintToRunIsMirrored = !SelectedVariants.bSprintBSIsMirrored;
+	VariantPlan.bRunCycleIsMirrored = SelectedVariants.bSprintToRunIsMirrored;
+	StartTimes.RunCycle = RunCycleAfterSprintToRunStartTime;
+}
+
+// SprintStop 진입 순간의 커브로 정지 클립을 고르고 다음 이동 계획을 갱신한다.
+void UPlayableAnimInstance::SelectSprintStopClip()
+{
+	SelectedVariants.bSprintStopIsMirrored = DoesCurveSelectMirroredClip(RunStopVariantCurveName);
+	UpdateMovementVariantPlan(SelectedVariants.bSprintStopIsMirrored);
+	StartTimes.RunCycle = 0.0f;
+}
+
+// 최초 생성과 두 정지 상태 진입에서 전달받은 정지 선택으로 이동 계획을 만든다.
+void UPlayableAnimInstance::UpdateMovementVariantPlan(bool bStopIsMirrored)
+{
+	VariantPlan.bRunCycleIsMirrored = !bStopIsMirrored;
+	VariantPlan.bSprintIsMirrored = !bStopIsMirrored;
+}
+
+// 커브는 계속 변하지만 정지 클립은 정지 상태 진입 순간에 한 번 선택한다.
+bool UPlayableAnimInstance::DoesCurveSelectMirroredClip(FName CurveName) const
+{
+	float CurveValue = 0.0f;
+	const bool bHasCurveValue = GetCurveValue(CurveName, CurveValue);
+	checkf(bHasCurveValue, TEXT("필수 애니메이션 커브 '%s'를 읽을 수 없습니다."), *CurveName.ToString());
+	return CurveValue > 0.0f;
 }
