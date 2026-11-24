@@ -17,6 +17,10 @@
 *.vcxproj.filters
 *.vcxproj.user
 
+# Local Visual Studio filter helpers
+/Merge-UnrealFilters.ps1
+/Merge-UnrealFilters.bat
+
 # External assets stay local; Content/Game remains tracked
 /Content/ExternalAsset/
 

@@ -49,9 +49,7 @@ Genshin_Clone/
 │  │  └─ Genshin_Clone.Build.cs
 │  ├─ Genshin_Clone.Target.cs
 │  └─ Genshin_CloneEditor.Target.cs
-├─ Genshin_Clone.uproject
-├─ Merge-UnrealFilters.ps1     # Visual Studio 필터 정리
-└─ Merge-UnrealFilters.bat     # 필터 정리 실행
+└─ Genshin_Clone.uproject
 ```
 
 ## 🔧 실행 안내
