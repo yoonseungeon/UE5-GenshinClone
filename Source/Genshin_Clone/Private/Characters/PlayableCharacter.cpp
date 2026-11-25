@@ -18,7 +18,10 @@
 #include "Animation/PlayableAnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 
-APlayableCharacter::APlayableCharacter()
+#include "Components/PlayableMovementComponent.h"
+
+APlayableCharacter::APlayableCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPlayableMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	// [회전-01] Controller의 회전을 Actor에도 적용할지
 	bUseControllerRotationPitch = false;
@@ -90,6 +93,15 @@ void APlayableCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 
 	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Completed, this, &APlayableCharacter::ClearMovementInputDirection);
 	EnhancedInputComponent->BindAction(MoveInputAction, ETriggerEvent::Canceled, this, &APlayableCharacter::ClearMovementInputDirection);
+}
+
+// [점프-09] 엔진이 DoJump()의 반환값을 보고 점프가 성공했다고 판단하면 호출
+void APlayableCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+
+	UPlayableAnimInstance* PlayableAnimInstance = CastChecked<UPlayableAnimInstance>(GetMesh()->GetAnimInstance());
+	PlayableAnimInstance->SelectJumpClip(!MovementInputDirection.IsNearlyZero());
 }
 
 // [입력-04] 카메라 기준 입력을 월드 방향으로 바꾸고 캐릭터 이동에 전달한다.

@@ -3,6 +3,24 @@
 #include "CoreMinimal.h"
 #include "PlayableLocomotionTypes.generated.h"
 
+// [점프-09] 점프 시작 시 선택할 애니메이션 종류다.
+UENUM(BlueprintType)
+enum class EJumpClipType : uint8
+{
+	Standing,
+	Run,
+	Sprint
+};
+
+// [점프-10] 착지 상태에 진입할 때 선택할 애니메이션 종류다.
+UENUM(BlueprintType)
+enum class ELandingClipType : uint8
+{
+	Standing,
+	Run,
+	Sprint
+};
+
 // [지상이동-01] 이동 경로의 기본 선택과 다음 RunCycle의 선택을 묶는다.
 USTRUCT(BlueprintType)
 struct GENSHIN_CLONE_API FMovementVariantPlan

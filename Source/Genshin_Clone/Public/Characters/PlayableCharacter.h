@@ -15,7 +15,7 @@ class GENSHIN_CLONE_API APlayableCharacter : public ACharacterBase
 	GENERATED_BODY()
 	
 public:
-	APlayableCharacter();
+	APlayableCharacter(const FObjectInitializer& ObjectInitializer);
 
 	const FVector& GetMovementInputDirection() const { return MovementInputDirection; }
 
@@ -23,6 +23,9 @@ public:
 
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	// [점프-09] 점프가 성공했을 때 애니메이션 종류를 선택한다.
+	virtual void OnJumped_Implementation() override;
 
 private:
 	// Cameras

@@ -2,7 +2,7 @@
 
 #include "Characters/PlayableCharacter.h"
 #include "Components/DashComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/PlayableMovementComponent.h"
 
 // [지상이동-02] 루트 모션 정책과 최초 이동 계획을 설정한다.
 UPlayableAnimInstance::UPlayableAnimInstance()
@@ -26,6 +26,10 @@ void UPlayableAnimInstance::NativeBeginPlay()
 	APlayableCharacter* PlayableCharacter = Cast<APlayableCharacter>(TryGetPawnOwner());
 	if (!PlayableCharacter)
 		return;
+
+	// [점프-09] 지상 상태머신의 조회 인덱스를 저장한다.
+	GroundedMovementMachineIndex = GetStateMachineIndex(TEXT("GroundedMovement"));
+	checkf(GroundedMovementMachineIndex != INDEX_NONE, TEXT("GroundedMovement 상태머신을 찾을 수 없습니다."));
 
 	DashRequest.SnapshotId = PlayableCharacter->GetDashComponent()->GetDashRequestId();
 	DashRequest.PendingId = DashRequest.SnapshotId;
@@ -56,7 +60,11 @@ void UPlayableAnimInstance::NativeUpdateAnimation(float DeltaTime)
 		return;
 
 	bHasMovementInput = !PlayableCharacter->GetMovementInputDirection().IsNearlyZero();
-	bIsMovingOnGround = PlayableCharacter->GetCharacterMovement()->IsMovingOnGround();
+	// [점프-07] 현재 이동 모드에서 지상·루트 점프·중력 낙하 여부를 읽는다.
+	const UPlayableMovementComponent* PlayableMovementComponent = static_cast<const UPlayableMovementComponent*>(PlayableCharacter->GetCharacterMovement());
+	bIsMovingOnGround = PlayableMovementComponent->IsMovingOnGround();
+	bIsRootMotionJumpActive = PlayableMovementComponent->IsRootMotionJumpActive();
+	bIsFalling = PlayableMovementComponent->IsFalling();
 
 	const UDashComponent* DashComponent = PlayableCharacter->GetDashComponent();
 	bSprintInputHeld = DashComponent->IsSprintInputHeld();
@@ -129,4 +137,42 @@ bool UPlayableAnimInstance::DoesCurveSelectMirroredClip(FName CurveName) const
 	const bool bHasCurveValue = GetCurveValue(CurveName, CurveValue);
 	checkf(bHasCurveValue, TEXT("필수 애니메이션 커브 '%s'를 읽을 수 없습니다."), *CurveName.ToString());
 	return CurveValue > 0.0f;
+}
+
+// [점프-09] 현재 지상 상태 이름에 따라 이번 Jump 애니메이션 종류를 고정한다.
+void UPlayableAnimInstance::SelectJumpClip(bool bHasMovementInputAtJump)
+{
+	const FName GroundedStateName = GetCurrentStateName(GroundedMovementMachineIndex);
+
+	if (GroundedStateName == TEXT("Standby"))
+	{
+		SelectedJumpClipType = EJumpClipType::Standing;
+	}
+	else if (GroundedStateName == TEXT("Run") || GroundedStateName == TEXT("SprintToRun"))
+	{
+		SelectedJumpClipType = EJumpClipType::Run;
+	}
+	else if (GroundedStateName == TEXT("SprintStart") || GroundedStateName == TEXT("Sprint"))
+	{
+		SelectedJumpClipType = EJumpClipType::Sprint;
+	}
+	else if (GroundedStateName == TEXT("RunStop") || GroundedStateName == TEXT("SprintStop"))
+	{
+		SelectedJumpClipType = bHasMovementInputAtJump ? EJumpClipType::Run : EJumpClipType::Standing;
+	}
+	else
+	{
+		checkf(false, TEXT("점프 종류가 정의되지 않은 지상 상태입니다: %s"), *GroundedStateName.ToString());
+	}
+}
+
+// [점프-10] Landing 진입 시 현재 이동·Sprint 유지 입력으로 착지 종류를 한 번 선택한다.
+void UPlayableAnimInstance::SelectLandingClip()
+{
+	if (!bHasMovementInput)
+		SelectedLandingClipType = ELandingClipType::Standing;
+	else if (bSprintInputHeld)
+		SelectedLandingClipType = ELandingClipType::Sprint;
+	else
+		SelectedLandingClipType = ELandingClipType::Run;
 }

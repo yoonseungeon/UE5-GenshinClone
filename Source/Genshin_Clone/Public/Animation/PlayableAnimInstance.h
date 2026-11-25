@@ -13,6 +13,7 @@ class GENSHIN_CLONE_API UPlayableAnimInstance : public UAnimInstance
 public:
 	UPlayableAnimInstance();
 
+public:
 	// [지상이동-05] SprintBS의 재입력 허용 시각으로 대시 시작 승인을 요청한다.
 	void RequestSprintStart();
 
@@ -39,12 +40,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion", meta = (BlueprintThreadSafe))
 	void SelectSprintStopClip();
 
+	// [점프-09] 점프 직전 지상 상태와 입력으로 이번 Jump 애니메이션을 선택한다.
+	void SelectJumpClip(bool bHasMovementInputAtJump);
+
+	// [점프-10] 착지 상태 진입 시 이동·Sprint 유지 입력으로 클립을 선택한다.
+	UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion", meta = (BlueprintThreadSafe))
+	void SelectLandingClip();
+
 protected:
 	// [지상이동-02] 그래프 초기화 전에 RunCycle의 일반 출발 위치를 초기화한다.
 	virtual void NativeInitializeAnimation() override;
 	virtual void NativeBeginPlay() override;
 	virtual void NativeUpdateAnimation(float DeltaTime) override;
 
+protected:
 	// 매 업데이트에서 갱신하는 입력과 지상 여부다.
 	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
 	bool bHasMovementInput = false;
@@ -72,6 +81,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
 	float TransitionBlendTime = 0.1f;
 
+	// [점프-07] AnimGraph에 전달할 루트 점프와 중력 낙하 여부다.
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+	bool bIsRootMotionJumpActive = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|Locomotion")
+	bool bIsFalling = false;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Animation|Locomotion")
+	EJumpClipType SelectedJumpClipType = EJumpClipType::Standing;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Animation|Locomotion")
+	ELandingClipType SelectedLandingClipType = ELandingClipType::Standing;
+
 private:
 	void UpdateMovementVariantPlan(bool bStopIsMirrored);
 	bool DoesCurveSelectMirroredClip(FName CurveName) const;
@@ -83,4 +105,6 @@ private:
 	FMovementVariantPlan VariantPlan;
 
 	FDashRequestState DashRequest;
+
+	int32 GroundedMovementMachineIndex = INDEX_NONE;
 };
