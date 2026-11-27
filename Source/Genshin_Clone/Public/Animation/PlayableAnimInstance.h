@@ -47,6 +47,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion", meta = (BlueprintThreadSafe))
 	void SelectLandingClip();
 
+	// [점프-13] DropDown 이후의 착지는 원본으로 예약한다.
+	UFUNCTION(BlueprintCallable, Category = "Animation|Locomotion", meta = (BlueprintThreadSafe))
+	void PrepareLandingAfterDropDown();
+
 protected:
 	// [지상이동-02] 그래프 초기화 전에 RunCycle의 일반 출발 위치를 초기화한다.
 	virtual void NativeInitializeAnimation() override;
@@ -74,6 +78,20 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
 	float RunCycleAfterSprintToRunStartTime = 31.0f / 60.0f - 0.1f;
+
+	// [점프-14] Run·Sprint 착지 이후 RunCycle의 시작 시각이다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
+	float RunCycleAfterRunLandingStartTime = 25.0f / 60.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
+	float RunCycleAfterSprintLandingStartTime = 2.0f / 60.0f;
+
+	// [점프-15] SprintBS·Sprint 착지 이후 SprintCycle의 시작 시각이다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
+	float SprintCycleAfterSprintBSStartTime = 17.0f / 60.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing", meta = (Units = "s"))
+	float SprintCycleAfterSprintLandingStartTime = 22.0f / 60.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Timing")
 	FLocomotionTransitionTimes TransitionTimes;
@@ -107,4 +125,7 @@ private:
 	FDashRequestState DashRequest;
 
 	int32 GroundedMovementMachineIndex = INDEX_NONE;
+
+	// [점프-13] 다음 Landing에서 확정할 원본·미러 예약값이다.
+	bool bNextLandingIsMirrored = false;
 };

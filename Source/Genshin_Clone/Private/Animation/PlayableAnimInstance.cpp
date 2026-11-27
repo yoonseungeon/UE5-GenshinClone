@@ -99,12 +99,16 @@ void UPlayableAnimInstance::SelectSprintBSClip()
 {
 	SelectedVariants.bSprintBSIsMirrored = VariantPlan.bSprintIsMirrored;
 	DashRequest.LastEnteredId = DashRequest.SnapshotId;
+
+	// [점프-15] SprintBS 이후 SprintCycle의 선택과 시작 시각을 준비한다.
+	VariantPlan.bSprintCycleIsMirrored = SelectedVariants.bSprintBSIsMirrored;
+	StartTimes.SprintCycle = SprintCycleAfterSprintBSStartTime;
 }
 
 // Sprint 진입에서 SprintBS와 같은 원본·미러의 SprintCycle을 고른다.
 void UPlayableAnimInstance::SelectSprintCycleClip()
 {
-	SelectedVariants.bSprintCycleIsMirrored = SelectedVariants.bSprintBSIsMirrored;
+	SelectedVariants.bSprintCycleIsMirrored = VariantPlan.bSprintCycleIsMirrored;
 }
 
 // SprintToRun 진입에서 SprintBS 반대의 원본·미러를 고르고 이후 RunCycle 선택과 시작 위치를 준비한다.
@@ -164,6 +168,23 @@ void UPlayableAnimInstance::SelectJumpClip(bool bHasMovementInputAtJump)
 	{
 		checkf(false, TEXT("점프 종류가 정의되지 않은 지상 상태입니다: %s"), *GroundedStateName.ToString());
 	}
+
+	// [점프-12] 선택한 Jump 종류에 맞춰 원본·미러를 한 번 고정한다.
+	if (SelectedJumpClipType == EJumpClipType::Standing)
+		SelectedVariants.bJumpIsMirrored = false;
+	else if (SelectedJumpClipType == EJumpClipType::Run)
+		SelectedVariants.bJumpIsMirrored = !DoesCurveSelectMirroredClip(RunStopVariantCurveName);
+	else
+		SelectedVariants.bJumpIsMirrored = DoesCurveSelectMirroredClip(RunStopVariantCurveName);
+
+	// [점프-13] 제자리 Jump는 원본, 이동 Jump는 Jump와 같은 원본·미러로 착지를 예약한다.
+	bNextLandingIsMirrored = (SelectedJumpClipType != EJumpClipType::Standing) && SelectedVariants.bJumpIsMirrored;
+}
+
+// [점프-13] DropDown 진입에서는 이전 Jump의 착지 예약을 원본으로 바꾼다.
+void UPlayableAnimInstance::PrepareLandingAfterDropDown()
+{
+	bNextLandingIsMirrored = false;
 }
 
 // [점프-10] Landing 진입 시 현재 이동·Sprint 유지 입력으로 착지 종류를 한 번 선택한다.
@@ -175,4 +196,31 @@ void UPlayableAnimInstance::SelectLandingClip()
 		SelectedLandingClipType = ELandingClipType::Sprint;
 	else
 		SelectedLandingClipType = ELandingClipType::Run;
+
+	// [점프-13] 제자리 착지는 원본, 이동 착지는 예약된 원본·미러로 확정한다.
+	SelectedVariants.bLandingIsMirrored = (SelectedLandingClipType != ELandingClipType::Standing) && bNextLandingIsMirrored;
+
+	// [점프-14] 착지 이후 Run 진입에서 확정할 RunCycle 선택과 시작 시각을 준비한다.
+	if (SelectedLandingClipType == ELandingClipType::Standing)
+	{
+		VariantPlan.bRunCycleIsMirrored = false;
+		StartTimes.RunCycle = 0.0f;
+	}
+	else if (SelectedLandingClipType == ELandingClipType::Run)
+	{
+		VariantPlan.bRunCycleIsMirrored = SelectedVariants.bLandingIsMirrored;
+		StartTimes.RunCycle = RunCycleAfterRunLandingStartTime;
+	}
+	else
+	{
+		VariantPlan.bRunCycleIsMirrored = SelectedVariants.bLandingIsMirrored;
+		StartTimes.RunCycle = RunCycleAfterSprintLandingStartTime;
+	}
+
+	// [점프-15] Sprint 착지 이후 SprintCycle의 선택과 시작 시각을 준비한다.
+	if (SelectedLandingClipType == ELandingClipType::Sprint)
+	{
+		VariantPlan.bSprintCycleIsMirrored = SelectedVariants.bLandingIsMirrored;
+		StartTimes.SprintCycle = SprintCycleAfterSprintLandingStartTime;
+	}
 }
